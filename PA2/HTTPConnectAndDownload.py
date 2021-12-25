@@ -12,9 +12,10 @@ import math
 
 
 
-class ConnectAndDownload(object):
+class HTTPConnectAndDownload:
     """
-
+    This class manages HTTP GET and HEAD requests, and also downloads files in parallel using threading. Only the socket library
+    is used for connection to the server and to acquire data.
     """
 
 
@@ -22,6 +23,7 @@ class ConnectAndDownload(object):
         """
         Initializes the class
         :param target: the target string, which contains both the host and the file directory
+        :param thread_no: number of threads to be utilized for this connection
         """
 
         self.host, self.file = target.split('/', 1)  # obtain host and file, both will be used in HTTP Requests
@@ -30,6 +32,9 @@ class ConnectAndDownload(object):
         # GET and HEAD request strings; host, file and range as args
         self.__GET = lambda byte_range: f"GET /{self.file} HTTP/1.1\r\nHost: {self.host}\r\nRange: bytes={byte_range}\r\n\r\n"
         self.__HEAD = f"HEAD /{self.file} HTTP/1.1\r\nHost: {self.host}\r\n\r\n"
+
+        # logging for console
+        logging.basicConfig(format="%(message)s", level=logging.INFO)
 
 
 
@@ -40,6 +45,7 @@ class ConnectAndDownload(object):
         :param port: Port number where the connection will be held, default 80
         :return: the HTTP response
         """
+
         client = socket.socket()  # create socket
         client.connect((self.host, port))  # connect to the host at port 80
         request_string = self.__GET(byte_range)  # create the GET request string from tha above function
@@ -47,9 +53,10 @@ class ConnectAndDownload(object):
         response = self._receive_data(client=client)  # receive response
         client.close()  # close socket
 
-        message, header_dict, content = self._get_info(response)
+        message, header_dict, content = self._get_info(response)  # get info such as the header and content
 
         return message, header_dict, content
+
 
 
     def _head_request(self, port=80):
@@ -58,6 +65,7 @@ class ConnectAndDownload(object):
         :param port: Port number where the connection will be held, default 80
         :return: the HTTP response
         """
+
         client = socket.socket()  # create socket
         client.connect((self.host, port))  # connect to the host at port 80
         request_string = self.__HEAD  # create the HEAD request string from tha above function
@@ -65,7 +73,7 @@ class ConnectAndDownload(object):
         response = self._receive_data(client=client)  # receive response
         client.close()  # close socket
 
-        message, header_dict, _ = self._get_info(response)
+        message, header_dict, _ = self._get_info(response) # get info such as the header and content
 
         return message, header_dict
 
@@ -73,6 +81,12 @@ class ConnectAndDownload(object):
 
     @staticmethod
     def _get_info(response):
+        """
+        Given a response from the server to the request, this method obtains the content and header seperately. It also seperates the message
+        and creates a dictionary out of the header.
+        :param response: The response for the GET/HEAD request sent over the socket to the server.
+        :return: The HTTP message, the header in dictionary format, and the content of the file
+        """
 
         header, content = response.split("\r\n\r\n", 1)
 
@@ -80,6 +94,7 @@ class ConnectAndDownload(object):
         message, header_dict = temp[0][0], dict(temp[1:])
 
         return message, header_dict, content
+
 
 
     @staticmethod
@@ -102,15 +117,11 @@ class ConnectAndDownload(object):
 
 
 
-
-
     def _download(self):
         """
         Downloads the given file from host. First, a HEAD request is made. The HTTP message is analyzed and the next move is made with the message
-        in mind. If it's OK, then a GET request is made and the contents of the file are written to a txt file. If it's Partial Content, the partial
-        content is downloaded in similar fashion. If the range is not satisfied, then an error is displayed on the console, no other requests are
-        made. Finally in similar fashion, if any other is obtained, an error is displayed on console. After these conditions, the download attempt
-        moves to the next file.
+        in mind. If it's OK, then the parallel download method is used to send GET requests in parallel and download the file. If any other message
+        is obtained, an error is displayed on console. After these conditions, the download attempt moves to the next file.
         """
 
         message, header_dict = self._head_request()  # make HEAD request
@@ -119,68 +130,84 @@ class ConnectAndDownload(object):
         if message == "HTTP/1.1 200 OK":
 
             content_length = int(header_dict["Content-Length"])
+
+            # below is a bunch of math necessary for the given condition in the assignment, here we decide on the byte ranges
             n_div_k = math.floor(content_length/self.thread_no)
             first_n = content_length - self.thread_no * n_div_k
             bytes_per_thread = [n_div_k + 1] * first_n + [n_div_k] * (self.thread_no - first_n)
 
-
-            # print(content_length, self.thread_no, bytes_per_thread)
-
-
+            # download the files in target, using threading
             contents = self._download_parallel(bytes_per_thread)
 
-            file_name = self.file.split("/")[-1]
 
+            # write to file
+            file_name = self.file.split("/")[-1]
             with open("test/" + file_name, "w") as out_file:
                 for i in range(self.thread_no):
                     out_file.write(contents[i])
                 out_file.close()
 
-
-
-            print(f"DOWNLOADED: File downloaded with the name {file_name}.")
+            logging.info(f"DOWNLOADED \u2713 : File downloaded successfully. | File Name: {file_name} | Content Length : {content_length}")
 
         else:
-            print("FAILED: File not found.")
+            logging.info("FAILED \u02DF : File not found.")
 
 
 
 
     def _download_parallel(self, bytes_per_thread):
+        """
+        This method downloads the contents of the target file in parallel. Using the given bytes per thread, byte ranges are determined and threads
+        are assigned. Then, each thread sends a GET request, with the determined range of bytes. Then the contents of these requests are stored in a
+        dictionary for writing later.
+        :param bytes_per_thread: A list that contains information on how many bytes each thread has to download
+        :return: the contents of the file, downloaded parallel
+        """
 
-        logging.basicConfig(format="(%(asctime)s.%(msecs)02d) %(message)s", level=logging.INFO,
-                            datefmt="%H:%M:%S")
-
+        # initialize needed data structures
         threads = list()
         contents = dict()
         byte_ranges = list()
 
+        # start from 0th byte
         start_byte = 0
 
-        for index, byte in zip(range(self.thread_no), bytes_per_thread):
+        # initialize threads and also calculate the byte ranges
+        for i, byte in zip(range(self.thread_no), bytes_per_thread):
+
             end_byte = start_byte + byte - 1
             byte_range = f"{start_byte}-{end_byte}"
             byte_ranges.append(byte_range)
-            t = Thread(target=self.__thread_process, args=(index, byte_range, contents))
-            threads.append(t)
-
             start_byte = end_byte + 1
 
-        logging.info(f"Starting {self.thread_no} Threads")
+            t = Thread(target=self.__thread_process, args=(i, byte_range, contents))
+            threads.append(t)
+
+
+        # start thread processes
+        logging.info(f"--Starting {self.thread_no} Threads--")
         for thread in threads:
             thread.start()
 
-        for index, thread in enumerate(threads):
+        # wait for all threads to end, print affirmation
+        for i, thread in enumerate(threads):
             thread.join()
-            logging.info(f"Download Completed on Thread {index} | Byte Range: {byte_ranges[index]} | Length: {bytes_per_thread[index]}")
+            logging.info(f"\u00B7 Download Completed on Thread {i} | Byte Range: {byte_ranges[i]} | Length: {bytes_per_thread[i]}")
 
 
         return contents
 
 
 
-    def __thread_process(self, index, byte_range, contents):
-        contents[index] = self._get_request(byte_range=byte_range)[-1]
+    def __thread_process(self, i, byte_range, contents):
+        """
+        This method is the thread process, which simply sends a GET request and then collects the content of the request to a dictionary
+        :param i: Thread index
+        :param byte_range: The assigned byte range for the thread
+        :param contents: the mutable contents dictionary
+        """
+
+        contents[i] = self._get_request(byte_range=byte_range)[-1]
 
 
 
