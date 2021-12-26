@@ -26,6 +26,7 @@ class ParallelFileDownloader(HTTPConnectAndDownload):
         logging.info(f"\nIndex File URL: {index_file}\nParalell Connections to be Established: {thread_no}")
 
 
+
     def __call__(self, *args, **kwargs):
 
         message, _, content = super()._get_request() # send a GET request to obtain index file contents
@@ -61,6 +62,7 @@ class ParallelFileDownloader(HTTPConnectAndDownload):
 
 
 
+
 def main():
     """
     The main function, obtains the command line arguments and passes them to the correct places.
@@ -70,7 +72,6 @@ def main():
     index_file, connection_count = args[0], args[1]
     PFD = ParallelFileDownloader(index_file, connection_count)
     PFD()
-
 
 
 

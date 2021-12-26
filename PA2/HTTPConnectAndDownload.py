@@ -80,24 +80,6 @@ class HTTPConnectAndDownload:
 
 
     @staticmethod
-    def _get_info(response):
-        """
-        Given a response from the server to the request, this method obtains the content and header seperately. It also seperates the message
-        and creates a dictionary out of the header.
-        :param response: The response for the GET/HEAD request sent over the socket to the server.
-        :return: The HTTP message, the header in dictionary format, and the content of the file
-        """
-
-        header, content = response.split("\r\n\r\n", 1)
-
-        temp = [i.split(": ") for i in header.split("\r\n")]
-        message, header_dict = temp[0][0], dict(temp[1:])
-
-        return message, header_dict, content
-
-
-
-    @staticmethod
     def _receive_data(client, decode=True):
         """
         Recieves HTTP response 1024 bytes at a time in a for loop, until no data is recieved
@@ -114,6 +96,24 @@ class HTTPConnectAndDownload:
             response += r
 
         return response.decode("utf-8") if decode else response
+
+
+
+    @staticmethod
+    def _get_info(response):
+        """
+        Given a response from the server to the request, this method obtains the content and header separately. It also separates the message
+        and creates a dictionary out of the header.
+        :param response: The response for the GET/HEAD request sent over the socket to the server.
+        :return: The HTTP message, the header in dictionary format, and the content of the file
+        """
+
+        header, content = response.split("\r\n\r\n", 1)
+
+        temp = [i.split(": ") for i in header.split("\r\n")]
+        message, header_dict = temp[0][0], dict(temp[1:])
+
+        return message, header_dict, content
 
 
 
@@ -142,7 +142,7 @@ class HTTPConnectAndDownload:
 
             # write to file
             file_name = self.file.split("/")[-1]
-            with open("test/" + file_name, "w") as out_file:
+            with open(file_name, "w") as out_file:
                 for i in range(self.thread_no):
                     out_file.write(contents[i])
                 out_file.close()
